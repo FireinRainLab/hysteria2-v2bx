@@ -90,6 +90,20 @@ type serverConfig struct {
 	Outbounds             []serverConfigOutboundEntry `mapstructure:"outbounds"`
 	TrafficStats          serverConfigTrafficStats    `mapstructure:"trafficStats"`
 	Masquerade            serverConfigMasquerade      `mapstructure:"masquerade"`
+	V2board               *v2boardConfig              `mapstructure:"v2board"`
+
+	// v2boardProvider is populated by fillAuthenticator when
+	// auth.type == "v2board" so that fillTrafficLogger can later
+	// call UpdateUsers on the same instance. Not exposed to mapstructure.
+	v2boardProvider *auth.V2boardApiProvider
+}
+
+type v2boardConfig struct {
+	ApiHost      string        `mapstructure:"apiHost"`
+	ApiKey       string        `mapstructure:"apiKey"`
+	NodeID       uint          `mapstructure:"nodeID"`
+	PullInterval time.Duration `mapstructure:"pullInterval"`
+	PushInterval time.Duration `mapstructure:"pushInterval"`
 }
 
 type serverConfigRealm struct {
@@ -1454,9 +1468,96 @@ func (c *serverConfig) fillAuthenticator(hyConfig *server.Config) error {
 		}
 		hyConfig.Authenticator = &auth.CommandAuthenticator{Cmd: c.Auth.Command}
 		return nil
+	case "v2board":
+		if c.V2board == nil || c.V2board.ApiHost == "" || c.V2board.ApiKey == "" || c.V2board.NodeID == 0 {
+			return configError{Field: "auth.v2board", Err: errors.New("v2board config error: apiHost/apiKey/nodeID are required")}
+		}
+		userURL := v2boardUserURL(c.V2board)
+		provider := auth.NewV2boardApiProvider(userURL, &authZapAdapter{l: logger})
+		c.v2boardProvider = provider
+		hyConfig.Authenticator = provider
+		return nil
 	default:
 		return configError{Field: "auth.type", Err: errors.New("unsupported auth type")}
 	}
+}
+
+func v2boardUserURL(v *v2boardConfig) string {
+	return fmt.Sprintf("%s?token=%s&node_id=%d&node_type=hysteria",
+		v.ApiHost+"/api/v1/server/UniProxy/user", v.ApiKey, v.NodeID)
+}
+
+func v2boardPushURL(v *v2boardConfig) string {
+	return fmt.Sprintf("%s?token=%s&node_id=%d&node_type=hysteria",
+		v.ApiHost+"/api/v1/server/UniProxy/push", v.ApiKey, v.NodeID)
+}
+
+func v2boardConfigURL(v *v2boardConfig) string {
+	query := url.Values{
+		"token":     {v.ApiKey},
+		"node_id":   {strconv.Itoa(int(v.NodeID))},
+		"node_type": {"hysteria"},
+	}
+	return v.ApiHost + "/api/v1/server/UniProxy/config?" + query.Encode()
+}
+
+// v2boardNodeConfig mirrors the subset of the v2board /config response
+// that we consume locally.
+type v2boardNodeConfig struct {
+	Host       string `json:"host"`
+	ServerPort uint   `json:"server_port"`
+	ServerName string `json:"server_name"`
+	UpMbps     uint   `json:"down_mbps"`
+	DownMbps   uint   `json:"up_mbps"`
+	Obfs       string `json:"obfs"`
+	BaseConfig struct {
+		PushInterval int `json:"push_interval"`
+		PullInterval int `json:"pull_interval"`
+	} `json:"base_config"`
+}
+
+// applyV2boardNodeConfig pulls the node configuration from the v2board
+// panel and overwrites the corresponding fields in the local config
+// object. Missing/zero values are skipped so that the local config
+// remains the source of truth for those fields.
+func applyV2boardNodeConfig(cfg *serverConfig) error {
+	resp, err := http.Get(v2boardConfigURL(cfg.V2board))
+	if err != nil {
+		return fmt.Errorf("http get failed: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("unexpected status %d", resp.StatusCode)
+	}
+
+	var node v2boardNodeConfig
+	if err := json.NewDecoder(resp.Body).Decode(&node); err != nil {
+		return fmt.Errorf("decode failed: %w", err)
+	}
+
+	if node.ServerPort != 0 {
+		cfg.Listen = ":" + strconv.Itoa(int(node.ServerPort))
+	}
+	// v2board uses "down_mbps" for the node's downstream-to-user speed,
+	// which maps to Hysteria's "up" (server -> client). "up_mbps" is
+	// the user's upstream-to-node speed, mapping to Hysteria's "down".
+	if node.DownMbps != 0 {
+		cfg.Bandwidth.Up = strconv.Itoa(int(node.DownMbps)) + "Mbps"
+	}
+	if node.UpMbps != 0 {
+		cfg.Bandwidth.Down = strconv.Itoa(int(node.UpMbps)) + "Mbps"
+	}
+	if node.Obfs != "" {
+		cfg.Obfs.Type = "salamander"
+		cfg.Obfs.Salamander.Password = node.Obfs
+	}
+	if node.BaseConfig.PullInterval > 0 && cfg.V2board.PullInterval <= 0 {
+		cfg.V2board.PullInterval = time.Duration(node.BaseConfig.PullInterval) * time.Second
+	}
+	if node.BaseConfig.PushInterval > 0 && cfg.V2board.PushInterval <= 0 {
+		cfg.V2board.PushInterval = time.Duration(node.BaseConfig.PushInterval) * time.Second
+	}
+	return nil
 }
 
 func (c *serverConfig) fillEventLogger(hyConfig *server.Config) error {
@@ -1468,6 +1569,30 @@ func (c *serverConfig) fillTrafficLogger(hyConfig *server.Config) error {
 	if c.TrafficStats.Listen != "" {
 		tss := trafficlogger.NewTrafficStatsServer(c.TrafficStats.Secret)
 		hyConfig.TrafficLogger = tss
+		if c.v2boardProvider != nil {
+			pullInterval := c.V2board.PullInterval
+			if pullInterval <= 0 {
+				pullInterval = 5 * time.Second
+			}
+			pushInterval := c.V2board.PushInterval
+			if pushInterval <= 0 {
+				pushInterval = 60 * time.Second
+			}
+			pushURL := v2boardPushURL(c.V2board)
+
+			// tss 的底层具体类型是 *trafficStatsServerImpl，
+			// 它除了实现 TrafficStatsServer 接口外，还额外实现了
+			// auth.V2boardKicker（NewKick）以及 push 定时器方法。
+			// 通过对这组扩展能力做匿名接口断言，即可同时启用
+			// "用户下线自动踢出" 与 "流量上报面板" 两项功能。
+			if v2, ok := any(tss).(interface {
+				auth.V2boardKicker
+				PushTrafficToV2boardInterval(url string, interval time.Duration) (stop func())
+			}); ok {
+				c.v2boardProvider.UpdateUsers(pullInterval, v2)
+				v2.PushTrafficToV2boardInterval(pushURL, pushInterval)
+			}
+		}
 		go runTrafficStatsServer(c.TrafficStats.Listen, tss)
 	}
 	return nil
@@ -1621,6 +1746,17 @@ func runServer(v *viper.Viper) {
 	if err := v.Unmarshal(&config); err != nil {
 		logger.Fatal("failed to parse server config", zap.Error(err))
 	}
+
+	// If v2board integration is enabled, pull node-level settings
+	// (listen port, up/down bandwidth, obfs password) from the panel
+	// and merge them into the local config before constructing the
+	// Hysteria server config.
+	if config.V2board != nil && config.V2board.ApiHost != "" {
+		if err := applyV2boardNodeConfig(&config); err != nil {
+			logger.Warn("failed to fetch v2board node config, using local config", zap.Error(err))
+		}
+	}
+
 	hyConfig, err := config.Config()
 	if err != nil {
 		logger.Fatal("failed to load server config", zap.Error(err))
@@ -1790,4 +1926,17 @@ func listenUDPAddr(listen string) *net.UDPAddr {
 		return &net.UDPAddr{}
 	}
 	return addr
+}
+
+// authZapAdapter bridges the minimal auth.Logger interface to the
+// project's *zap.Logger so v2board-related logs are formatted
+// consistently with the rest of the server.
+type authZapAdapter struct{ l *zap.Logger }
+
+func (a *authZapAdapter) Infof(format string, args ...any) {
+	a.l.Sugar().Infof("[v2board] "+format, args...)
+}
+
+func (a *authZapAdapter) Warnf(format string, args ...any) {
+	a.l.Sugar().Warnf("[v2board] "+format, args...)
 }

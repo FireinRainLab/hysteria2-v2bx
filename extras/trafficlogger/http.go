@@ -1,9 +1,13 @@
 package trafficlogger
 
 import (
+	"bytes"
 	"cmp"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"slices"
 	"strconv"
@@ -296,4 +300,83 @@ func (s *trafficStatsServerImpl) kick(w http.ResponseWriter, r *http.Request) {
 	s.Mutex.Unlock()
 
 	w.WriteHeader(http.StatusOK)
+}
+
+// NewKick marks a user id so that the next LogTraffic call for that
+// id will return false, causing the server to disconnect the client.
+// This satisfies auth.V2boardKicker so the auth package can request
+// kicks when a user is removed from the v2board panel.
+func (s *trafficStatsServerImpl) NewKick(id string) bool {
+	s.Mutex.Lock()
+	defer s.Mutex.Unlock()
+	s.KickMap[id] = struct{}{}
+	return true
+}
+
+// PushTrafficToV2board posts the current traffic statistics to the
+// v2board push endpoint and clears the in-memory stats map on
+// success so the next push interval starts from a clean slate.
+// It returns the number of users pushed so callers can log it.
+func (s *trafficStatsServerImpl) PushTrafficToV2board(url string) (int, error) {
+	s.Mutex.Lock()
+
+	payload := make(map[string][2]int64, len(s.StatsMap))
+	for id, stats := range s.StatsMap {
+		payload[id] = [2]int64{int64(stats.Tx), int64(stats.Rx)}
+	}
+	if len(payload) == 0 {
+		s.Mutex.Unlock()
+		return 0, nil
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		s.Mutex.Unlock()
+		return 0, err
+	}
+	s.StatsMap = make(map[string]*trafficStatsEntry)
+	s.Mutex.Unlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewBuffer(body))
+	if err != nil {
+		return 0, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return 0, errors.New("push failed with status " + resp.Status)
+	}
+	return len(payload), nil
+}
+
+// PushTrafficToV2boardInterval starts a background loop that invokes
+// PushTrafficToV2board at the specified interval. The returned stop
+// function terminates the loop.
+func (s *trafficStatsServerImpl) PushTrafficToV2boardInterval(url string, interval time.Duration) (stop func()) {
+	log.Printf("[v2board] traffic push started, interval=%s", interval)
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				n, err := s.PushTrafficToV2board(url)
+				if err != nil {
+					log.Printf("[v2board] traffic push failed: %v", err)
+				} else {
+					log.Printf("[v2board] traffic push succeeded, users=%d", n)
+				}
+			}
+		}
+	}()
+	return cancel
 }
