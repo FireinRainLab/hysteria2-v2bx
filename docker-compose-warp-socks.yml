@@ -1,0 +1,14 @@
+services:
+  cloudflare-warp:
+    image: ghcr.io/shahradelahi/cloudflare-warp:dev
+    container_name: cloudflare-warp
+    restart: unless-stopped
+
+    network_mode: host
+
+    volumes:
+      - ./warp-data:/var/lib/cloudflare-warp
+
+    command:
+      - --socks-addr
+      - 0.0.0.0:40000
