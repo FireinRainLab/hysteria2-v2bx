@@ -207,14 +207,14 @@ install() {
 install_script_symlink() {
     print_info "安装 hy2v2bx 命令到系统..."
 
-    local script_dir
-    script_dir=$(dirname "$(readlink -f "$0")")
-    local source_script="${script_dir}/install_hy2v2bx.sh"
-
-    if [ -f "$source_script" ]; then
-        cp "$source_script" "$SCRIPT_PATH"
-    else
+    if [ -f "$0" ] && [ "$0" != "/bin/bash" ] && [ "$0" != "/usr/bin/bash" ]; then
         cp "$0" "$SCRIPT_PATH"
+    else
+        print_info "从远程下载脚本..."
+        if ! curl -fsSL -o "$SCRIPT_PATH" "$SCRIPT_URL"; then
+            print_error "下载脚本失败"
+            return 1
+        fi
     fi
 
     chmod +x "$SCRIPT_PATH"
