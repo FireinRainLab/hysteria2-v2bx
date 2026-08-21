@@ -1,6 +1,6 @@
 services:
   hysteria2-v2bx:
-    image: ghcr.io/fireinrainlab/hysteria2-v2bx:latest
+    image: fireinrain/hysteria2-v2bx:latest
     container_name: hysteria2-v2bx
     restart: unless-stopped
     network_mode: host
