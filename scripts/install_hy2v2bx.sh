@@ -105,35 +105,85 @@ v2board:
   apiHost: <请输入自己的apiHost地址>
   apiKey: <请输入自己的apiKey>
   nodeID: <请输入自己的nodeID>
+
 tls:
   type: tls
   cert: /etc/hysteria2-v2bx/server.crt
   key: /etc/hysteria2-v2bx/server.key
+
 auth:
   type: v2board
+
 trafficStats:
-  listen: 127.0.0.1:7653
-# 如果需要设置warp分流，需要开启outbounds配置
-# 并且在acl中添加warp路由规则,请自行决定是否开启
+  listen: 127.0.0.1:7656
+
+#####################################
+# Outbounds
+#####################################
+# 如果启用warp 需要取消注释，然后本地安装warp-socks5服务
 #outbounds:
-#  - name: proxy
+#  - name: warp
 #    type: socks5
 #    socks5:
 #      addr: 127.0.0.1:40000
+
+#####################################
+# ACL
+#####################################
+
 acl:
   inline:
+
+    # RFC1918
     - reject(10.0.0.0/8)
     - reject(172.16.0.0/12)
     - reject(192.168.0.0/16)
     - reject(127.0.0.0/8)
     - reject(fc00::/7)
-    #- proxy(geosite:google)
-    #- proxy(geoip:google)
+
+    # 如果启用 Warp
+    # - warp(geosite:google)
+    # - warp(geosite:youtube)
+    # - warp(geosite:telegram)
+
+    - direct(all)
+#####################################
+# Masquerade
+#####################################
 masquerade:
   type: proxy
   proxy:
-    url: https://bing.com/
+    url: https://www.bing.com
     rewriteHost: true
+    insecure: false
+    xForwarded: false
+#####################################
+# QUIC
+#####################################
+quic:
+  # 建议删掉窗口参数
+  maxIdleTimeout: 30s
+  maxIncomingStreams: 2048
+  disablePathMTUDiscovery: false
+#####################################
+# UDP
+#####################################
+udpIdleTimeout: 60s
+#####################################
+# Ignore Client Bandwidth
+#####################################
+ignoreClientBandwidth: false
+#####################################
+# Server Speed
+#####################################
+bandwidth:
+  up: 1000 mbps
+  down: 1000 mbps
+#####################################
+# Logging
+#####################################
+log:
+  level: info
 EOF
     print_success "配置文件创建完成: $CONFIG_FILE"
     print_warning "请编辑配置文件，填写 v2board 相关信息"
