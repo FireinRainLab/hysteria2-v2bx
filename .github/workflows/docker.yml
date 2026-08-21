@@ -50,9 +50,9 @@ jobs:
           push: true
           platforms: linux/amd64,linux/arm64
           tags: |
-            FireinRainLab/hysteria2-v2bx:latest
-            FireinRainLab/hysteria2-v2bx:v2
-            FireinRainLab/hysteria2-v2bx:${{ steps.get_version.outputs.version }}
+            fireinrainlab/hysteria2-v2bx:latest
+            fireinrainlab/hysteria2-v2bx:v2
+            fireinrainlab/hysteria2-v2bx:${{ steps.get_version.outputs.version }}
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:v2
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.get_version.outputs.version }}

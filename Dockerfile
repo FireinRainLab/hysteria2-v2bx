@@ -32,7 +32,7 @@ RUN if [ ! -e /etc/nsswitch.conf ]; then echo 'hosts: files dns' > /etc/nsswitch
 COPY ./entrypoint /usr/local/bin/entrypoint
 RUN set -ex \
     && apk upgrade \
-    && apk add bash tzdata ca-certificates \
+    && apk add bash tzdata ca-certificates openssl \
     && rm -rf /var/cache/apk/* \
     && chmod +x /usr/local/bin/entrypoint
 

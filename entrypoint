@@ -1,6 +1,19 @@
 #!/bin/sh
 
 CONFIG_FILE="/etc/hysteria/server.yaml"
+CERT_DIR="/etc/hysteria"
+
+# 生成自签名证书（仅首次）
+if [ ! -f "${CERT_DIR}/server.crt" ] || [ ! -f "${CERT_DIR}/server.key" ]; then
+    echo "Generating self-signed SSL certificate for bing.com..."
+    mkdir -p "$CERT_DIR"
+    openssl req -x509 -nodes -newkey ec:<(openssl ecparam -name prime256v1) \
+        -keyout "${CERT_DIR}/server.key" \
+        -out "${CERT_DIR}/server.crt" \
+        -subj "/CN=bing.com" \
+        -days 36500 2>/dev/null
+    echo "SSL certificate generated."
+fi
 
 if [ ! -f "$CONFIG_FILE" ]; then
     echo "Creating configuration file $CONFIG_FILE"
@@ -13,34 +26,90 @@ v2board:
   apiKey: ${apiKey}
   nodeID: ${nodeID}
 
-acme:
-  domains:
-    - ${domain}
-  email: ${email:-your@email.com}
+# 默认不使用acme申请真的tls证书
+#acme:
+# domains:
+#   - ${domain}
+# email: ${email:-your@email.com}
+
+tls:
+  type: tls
+  cert: ${CERT_DIR}/server.crt
+  key: ${CERT_DIR}/server.key
 
 auth:
   type: v2board
 
 trafficStats:
-  listen: 127.0.0.1:7653
+  listen: 127.0.0.1:7656
 
-# 如果需要设置warp路由，需要注释掉outbounds配置，并且在acl中添加warp路由规则
+#####################################
+# Outbounds
+#####################################
+
 #outbounds:
-# # 指定 SOCKS5
-# - name: proxy
-#   type: socks5
-#   socks5:
-#     addr: 127.0.0.1:40000
+#  - name: warp
+#    type: socks5
+#    socks5:
+#      addr: 127.0.0.1:40000
+
+#####################################
+# ACL
+#####################################
 
 acl:
   inline:
+
+    # RFC1918
     - reject(10.0.0.0/8)
     - reject(172.16.0.0/12)
     - reject(192.168.0.0/16)
     - reject(127.0.0.0/8)
     - reject(fc00::/7)
-#    - proxy(geosite:google)
-#    - proxy(geoip:google)
+
+    # 如果启用 Warp
+    # - warp(geosite:google)
+    # - warp(geosite:youtube)
+    # - warp(geosite:telegram)
+
+    - direct(all)
+#####################################
+# Masquerade
+#####################################
+masquerade:
+  type: proxy
+  proxy:
+    url: https://www.bing.com
+    rewriteHost: true
+    insecure: false
+    xForwarded: false
+#####################################
+# QUIC
+#####################################
+quic:
+  # 建议删掉窗口参数
+  maxIdleTimeout: 30s
+  maxIncomingStreams: 2048
+  disablePathMTUDiscovery: false
+#####################################
+# UDP
+#####################################
+udpIdleTimeout: 60s
+#####################################
+# Ignore Client Bandwidth
+#####################################
+ignoreClientBandwidth: false
+#####################################
+# Server Speed
+#####################################
+bandwidth:
+  up: 1000 mbps
+  down: 1000 mbps
+#####################################
+# Logging
+#####################################
+log:
+  level: info
 EOF
 fi
 
