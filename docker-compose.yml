@@ -11,5 +11,3 @@ services:
     # 如果需要自定义配置和设置证书，请挂载配置目录
     #volumes:
     #  - ./config:/etc/hysteria
-      # 如果需要使用自签名证书，挂载证书目录
-      # - ./certs:/etc/hysteria2-v2bx

@@ -120,17 +120,21 @@ trafficStats:
 #####################################
 # Outbounds
 #####################################
-# 如果启用warp 需要取消注释，然后本地安装warp-socks5服务
-#outbounds:
-#  - name: warp
-#    type: socks5
-#    socks5:
-#      addr: 127.0.0.1:40000
+outbounds:
+  - name: warp
+    type: socks5
+    socks5:
+      addr: 127.0.0.1:40000
 
 #####################################
 # ACL
 #####################################
-
+sniff:
+  enable: true
+  timeout: 2s
+  rewriteDomain: false
+  tcpPorts: 80,443,8000-9000
+  udpPorts: all
 acl:
   inline:
 
@@ -142,9 +146,10 @@ acl:
     - reject(fc00::/7)
 
     # 如果启用 Warp
-    # - warp(geosite:google)
-    # - warp(geosite:youtube)
-    # - warp(geosite:telegram)
+    - warp(domain:ifconfig.me)
+    - warp(geosite:google)
+    - warp(geoip:google)
+    #- warp(geosite:telegram)
 
     - direct(all)
 #####################################
