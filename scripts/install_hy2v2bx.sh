@@ -676,4 +676,23 @@ if [ "$(id -u)" -ne 0 ]; then
     exit 1
 fi
 
+if [ ! -t 0 ] && [ $# -eq 0 ]; then
+    print_warning "检测到非交互式运行方式（如 pipe 模式）"
+    print_info "建议使用以下方式运行："
+    echo ""
+    echo "  wget -qO /tmp/hy2v2bx.sh $SCRIPT_URL"
+    echo "  bash /tmp/hy2v2bx.sh"
+    echo ""
+    print_info "或者使用命令行参数："
+    echo "  bash $0 install     # 安装"
+    echo "  bash $0 update      # 更新"
+    echo "  bash $0 start       # 启动服务"
+    echo "  bash $0 status      # 查看状态"
+    echo ""
+    print_info "将自动执行 install 命令..."
+    echo ""
+    main install
+    exit $?
+fi
+
 main "$@"
