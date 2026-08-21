@@ -1,28 +1,49 @@
-name: "Build Docker Image"
+name: Build Docker Image
 
 on:
+  workflow_dispatch:
+
   push:
     tags:
-      - app/v*.*.*
+      - "app/v*.*.*"
 
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
-  IMAGE_NAME_LOWER: ${{ github.repository | lower }}
 
 jobs:
   docker:
     runs-on: ubuntu-latest
-    env:
-      ACTIONS_ALLOW_UNSECURE_COMMANDS: true
 
     steps:
       - name: Check out
         uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       - name: Get version
         id: get_version
-        run: echo "version=$(git describe --tags --always --match 'app/v*' | sed -n 's|app/\([^/-]*\)\(-.*\)\{0,1\}|\1|p')" >> $GITHUB_OUTPUT
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            VERSION="${GITHUB_REF_NAME#app/v}"
+          else
+            VERSION="dev"
+          fi
+
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+          echo "Version: ${VERSION}"
+
+      - name: Prepare image name
+        id: image
+        shell: bash
+        run: |
+          IMAGE_NAME_LOWER="$(echo "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')"
+
+          echo "name=${IMAGE_NAME_LOWER}" >> "$GITHUB_OUTPUT"
+
+          echo "Image: ${IMAGE_NAME_LOWER}"
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v4
@@ -49,14 +70,19 @@ jobs:
         with:
           context: .
           push: true
-          platforms: linux/amd64,linux/arm64
+          platforms: |
+            linux/amd64
+            linux/arm64
+
           tags: |
             fireinrainlab/hysteria2-v2bx:latest
             fireinrainlab/hysteria2-v2bx:v2
             fireinrainlab/hysteria2-v2bx:${{ steps.get_version.outputs.version }}
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LOWER }}:latest
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LOWER }}:v2
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_LOWER }}:${{ steps.get_version.outputs.version }}
+
+            ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}:latest
+            ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}:v2
+            ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}:${{ steps.get_version.outputs.version }}
 
       - name: Image digest
-        run: echo ${{ steps.docker_build.outputs.digest }}
+        run: |
+          echo "Digest: ${{ steps.docker_build.outputs.digest }}"
