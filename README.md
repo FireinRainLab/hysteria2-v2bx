@@ -64,3 +64,8 @@
    <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=apernet/hysteria&type=date&legend=top-left&sealed_token=K7X7A4ntaPiRwqCXrW5ZLxZa8rNoQzDOr49Gv4mvXHJDHSerFPUWDcmyyBK_qe3bkV7UAoR_QSn-tFuLB48e3Bvb-eZrUFNk7M8uanHqCOXK2sR0WyHVkw" />
  </picture>
 </a>
+
+## 安装
+```bash
+curl -fsSL https://raw.githubusercontent.com/FireinRainLab/hysteria2-v2bx/master/scripts/install_hy2v2bx.sh | bash
+```
