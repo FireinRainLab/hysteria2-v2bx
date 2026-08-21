@@ -184,7 +184,6 @@ install() {
     create_service_file
     create_config_file
     generate_ssl_cert
-    install_script_symlink
 
     print_info "重新加载 systemd..."
     systemctl daemon-reload
@@ -275,6 +274,38 @@ self_update() {
     fi
 }
 
+self_remove() {
+    echo ""
+    print_warning "===== 卸载管理脚本自身 ====="
+    echo ""
+
+    read -r -p "确定要卸载 hy2v2bx 管理脚本吗？(y/N): " confirm
+    if [ "$confirm" != "y" ] && [ "$confirm" != "Y" ]; then
+        print_info "取消卸载"
+        return 0
+    fi
+
+    print_info "删除 hy2v2bx 命令..."
+    rm -f "$SCRIPT_PATH"
+
+    if [ -f "${SCRIPT_PATH}.bak" ]; then
+        rm -f "${SCRIPT_PATH}.bak"
+    fi
+
+    echo ""
+    print_success "===== 管理脚本已卸载 ====="
+    print_info "hy2v2bx 命令已移除"
+    echo ""
+
+    if [ -f "$SERVICE_FILE" ]; then
+        print_warning "检测到 hysteria2-v2bx 服务仍在运行"
+        print_info "如需卸载服务，请运行: hy2v2bx uninstall"
+        echo ""
+    fi
+
+    exit 0
+}
+
 uninstall() {
     echo ""
     print_warning "===== Hysteria2-v2bx 卸载 ====="
@@ -297,9 +328,6 @@ uninstall() {
     print_info "删除二进制文件..."
     rm -f "$BINARY_PATH"
 
-    print_info "删除 hy2v2bx 命令..."
-    rm -f "$SCRIPT_PATH"
-
     read -r -p "是否保留配置文件和证书？(Y/n): " keep_config
     if [ "$keep_config" = "n" ] || [ "$keep_config" = "N" ]; then
         print_info "删除配置文件..."
@@ -311,8 +339,16 @@ uninstall() {
     fi
 
     echo ""
-    print_success "===== 卸载完成 ====="
+    print_success "===== Hysteria2-v2bx 卸载完成 ====="
     echo ""
+
+    read -r -p "是否同时卸载 hy2v2bx 管理脚本？(y/N): " remove_script
+    if [ "$remove_script" = "y" ] || [ "$remove_script" = "Y" ]; then
+        self_remove
+    else
+        print_info "hy2v2bx 管理脚本已保留"
+        echo ""
+    fi
 }
 
 update() {
@@ -571,21 +607,22 @@ show_menu() {
     echo "   2) 更新 hysteria2-v2bx"
     echo "   3) 卸载 hysteria2-v2bx"
     echo "   4) 更新管理脚本自身"
+    echo "   5) 卸载管理脚本自身"
     echo ""
     echo "  服务控制:"
-    echo "   5) 启动服务"
-    echo "   6) 停止服务"
-    echo "   7) 重启服务"
-    echo "   8) 查看服务状态"
+    echo "   6) 启动服务"
+    echo "   7) 停止服务"
+    echo "   8) 重启服务"
+    echo "   9) 查看服务状态"
     echo ""
     echo "  日志/配置:"
-    echo "   9) 查看日志"
-    echo "  10) 查看配置文件"
-    echo "  11) 编辑配置文件"
+    echo "  10) 查看日志"
+    echo "  11) 查看配置文件"
+    echo "  12) 编辑配置文件"
     echo ""
     echo "  其他:"
-    echo "  12) 查看版本信息"
-    echo "  13) 系统检查"
+    echo "  13) 查看版本信息"
+    echo "  14) 系统检查"
     echo "   0) 退出"
     echo ""
 }
@@ -599,6 +636,7 @@ main() {
         echo "  update     - 更新 hysteria2-v2bx"
         echo "  uninstall  - 卸载 hysteria2-v2bx"
         echo "  selfupdate - 更新管理脚本自身"
+        echo "  selfremove - 卸载管理脚本自身"
         echo "  start      - 启动服务"
         echo "  stop       - 停止服务"
         echo "  restart    - 重启服务"
@@ -621,6 +659,7 @@ main() {
             update)     update ;;
             uninstall)  uninstall ;;
             selfupdate) self_update "$@" ;;
+            selfremove) self_remove ;;
             start)      do_start ;;
             stop)       do_stop ;;
             restart)    do_restart ;;
@@ -641,28 +680,29 @@ main() {
 
     while true; do
         show_menu
-        read -r -p "请选择操作 [0-13]: " choice
+        read -r -p "请选择操作 [0-14]: " choice
 
         case "$choice" in
             1)  install ;;
             2)  update ;;
             3)  uninstall ;;
             4)  self_update ;;
-            5)  do_start ;;
-            6)  do_stop ;;
-            7)  do_restart ;;
-            8)  do_status ;;
-            9)  view_logs ;;
-            10) view_config ;;
-            11) edit_config ;;
-            12) show_version ;;
-            13) check_system ;;
+            5)  self_remove ;;
+            6)  do_start ;;
+            7)  do_stop ;;
+            8)  do_restart ;;
+            9)  do_status ;;
+            10) view_logs ;;
+            11) view_config ;;
+            12) edit_config ;;
+            13) show_version ;;
+            14) check_system ;;
             0)
                 print_info "退出管理脚本"
                 exit 0
                 ;;
             *)
-                print_error "无效选择，请输入 0-13"
+                print_error "无效选择，请输入 0-14"
                 ;;
         esac
 
@@ -676,23 +716,24 @@ if [ "$(id -u)" -ne 0 ]; then
     exit 1
 fi
 
+ensure_hy2v2bx_command() {
+    if [ ! -f "$SCRIPT_PATH" ]; then
+        print_info "首次安装 hy2v2bx 命令..."
+        install_script_symlink
+        echo ""
+    fi
+}
+
 if [ ! -t 0 ] && [ $# -eq 0 ]; then
-    print_warning "检测到非交互式运行方式（如 pipe 模式）"
-    print_info "建议使用以下方式运行："
+    ensure_hy2v2bx_command
+    print_success "hy2v2bx 命令安装完成"
     echo ""
-    echo "  wget -qO /tmp/hy2v2bx.sh $SCRIPT_URL"
-    echo "  bash /tmp/hy2v2bx.sh"
+    print_info "请执行以下命令进入交互式管理界面："
     echo ""
-    print_info "或者使用命令行参数："
-    echo "  bash $0 install     # 安装"
-    echo "  bash $0 update      # 更新"
-    echo "  bash $0 start       # 启动服务"
-    echo "  bash $0 status      # 查看状态"
+    echo -e "  \033[1;34mhy2v2bx\033[0m"
     echo ""
-    print_info "将自动执行 install 命令..."
-    echo ""
-    main install
-    exit $?
+    exit 0
 fi
 
+ensure_hy2v2bx_command
 main "$@"
