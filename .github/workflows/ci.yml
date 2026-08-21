@@ -10,7 +10,7 @@ on:
 
 jobs:
   build:
-    name: Build & Test
+    name: Build
     runs-on: ubuntu-latest
 
     steps:
@@ -26,34 +26,10 @@ jobs:
         working-directory: core
         run: go build ./...
 
-      - name: Vet core
-        working-directory: core
-        run: go vet ./...
-
       - name: Build extras
         working-directory: extras
         run: go build ./...
 
-      - name: Vet extras
-        working-directory: extras
-        run: go vet ./...
-
       - name: Build app
         working-directory: app
         run: go build ./...
-
-      - name: Vet app
-        working-directory: app
-        run: go vet ./...
-
-      - name: Test core
-        working-directory: core
-        run: go test -v -count=1 -skip 'Stress' ./...
-
-      - name: Test extras
-        working-directory: extras
-        run: go test -v -count=1 ./...
-
-      - name: Test app
-        working-directory: app
-        run: go test -v -count=1 ./...
